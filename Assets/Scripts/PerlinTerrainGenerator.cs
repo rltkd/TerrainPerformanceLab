@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using UnityEngine;
 
 public class PerlinTerrainGenerator : MonoBehaviour
@@ -15,16 +16,33 @@ public class PerlinTerrainGenerator : MonoBehaviour
     {
         if (targetTerrain == null)
         {
-            Debug.LogWarning("PerlinTerrainGenerator requires a Terrain reference.", this);
+            UnityEngine.Debug.LogWarning("PerlinTerrainGenerator requires a Terrain reference.", this);
             return;
         }
+
+        Stopwatch totalStopwatch = Stopwatch.StartNew();
 
         TerrainData terrainData = targetTerrain.terrainData;
         terrainData.heightmapResolution = heightmapResolution;
         terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
 
+        Stopwatch algorithmStopwatch = Stopwatch.StartNew();
         float[,] heights = GenerateHeights(heightmapResolution);
+        algorithmStopwatch.Stop();
+
+        Stopwatch setHeightsStopwatch = Stopwatch.StartNew();
         terrainData.SetHeights(0, 0, heights);
+        setHeightsStopwatch.Stop();
+
+        totalStopwatch.Stop();
+
+        double algorithmMs = algorithmStopwatch.Elapsed.TotalMilliseconds;
+        double setHeightsMs = setHeightsStopwatch.Elapsed.TotalMilliseconds;
+        double totalMs = totalStopwatch.Elapsed.TotalMilliseconds;
+
+        UnityEngine.Debug.Log(
+            $"algorithm_ms={algorithmMs:F3}, set_heights_ms={setHeightsMs:F3}, total_ms={totalMs:F3}",
+            this);
     }
 
     private float[,] GenerateHeights(int resolution)
