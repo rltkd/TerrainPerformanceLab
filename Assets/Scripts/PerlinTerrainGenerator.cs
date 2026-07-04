@@ -1,5 +1,7 @@
+using System.Collections;
 using System.Diagnostics;
 using UnityEngine;
+using Unity.Profiling;
 
 public class PerlinTerrainGenerator : MonoBehaviour
 {
@@ -20,29 +22,67 @@ public class PerlinTerrainGenerator : MonoBehaviour
             return;
         }
 
-        Stopwatch totalStopwatch = Stopwatch.StartNew();
+        StartCoroutine(GenerateTerrainWithProfiling());
+    }
 
-        TerrainData terrainData = targetTerrain.terrainData;
-        terrainData.heightmapResolution = heightmapResolution;
-        terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
+    private IEnumerator GenerateTerrainWithProfiling()
+    {
+        ProfilerRecorder totalUsedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Total Used Memory", 1);
 
-        Stopwatch algorithmStopwatch = Stopwatch.StartNew();
-        float[,] heights = GenerateHeights(heightmapResolution);
-        algorithmStopwatch.Stop();
+        try
+        {
+            yield return null;
 
-        Stopwatch setHeightsStopwatch = Stopwatch.StartNew();
-        terrainData.SetHeights(0, 0, heights);
-        setHeightsStopwatch.Stop();
+            int generationFrameCount = Time.frameCount;
+            Stopwatch totalStopwatch = Stopwatch.StartNew();
 
-        totalStopwatch.Stop();
+            TerrainData terrainData = targetTerrain.terrainData;
+            terrainData.heightmapResolution = heightmapResolution;
+            terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
 
-        double algorithmMs = algorithmStopwatch.Elapsed.TotalMilliseconds;
-        double setHeightsMs = setHeightsStopwatch.Elapsed.TotalMilliseconds;
-        double totalMs = totalStopwatch.Elapsed.TotalMilliseconds;
+            Stopwatch algorithmStopwatch = Stopwatch.StartNew();
+            float[,] heights = GenerateHeights(heightmapResolution);
+            algorithmStopwatch.Stop();
 
-        UnityEngine.Debug.Log(
-            $"algorithm_ms={algorithmMs:F3}, set_heights_ms={setHeightsMs:F3}, total_ms={totalMs:F3}",
-            this);
+            Stopwatch setHeightsStopwatch = Stopwatch.StartNew();
+            terrainData.SetHeights(0, 0, heights);
+            setHeightsStopwatch.Stop();
+
+            totalStopwatch.Stop();
+
+            double algorithmMs = algorithmStopwatch.Elapsed.TotalMilliseconds;
+            double setHeightsMs = setHeightsStopwatch.Elapsed.TotalMilliseconds;
+            double totalMs = totalStopwatch.Elapsed.TotalMilliseconds;
+
+            yield return null;
+
+            int measurementFrameCount = Time.frameCount;
+            double generationFrameMs = Time.unscaledDeltaTime * 1000.0;
+            bool hasTotalUsedMemorySample = totalUsedMemoryRecorder.Valid && totalUsedMemoryRecorder.Count > 0;
+
+            if (!hasTotalUsedMemorySample)
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"ProfilerRecorder sample missing. generation_frame_count={generationFrameCount}, " +
+                    $"total_used_memory_valid={totalUsedMemoryRecorder.Valid}, " +
+                    $"total_used_memory_count={totalUsedMemoryRecorder.Count}",
+                    this);
+            }
+
+            double totalUsedMemoryMb = hasTotalUsedMemorySample
+                ? totalUsedMemoryRecorder.LastValue / (1024.0 * 1024.0)
+                : double.NaN;
+
+            UnityEngine.Debug.Log(
+                $"algorithm_ms={algorithmMs:F3}, set_heights_ms={setHeightsMs:F3}, total_ms={totalMs:F3}, " +
+                $"generation_frame_ms={generationFrameMs:F3}, total_used_memory_mb={totalUsedMemoryMb:F3}, " +
+                $"generation_frame_count={generationFrameCount}, measurement_frame_count={measurementFrameCount}",
+                this);
+        }
+        finally
+        {
+            totalUsedMemoryRecorder.Dispose();
+        }
     }
 
     private float[,] GenerateHeights(int resolution)
