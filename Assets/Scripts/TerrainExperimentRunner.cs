@@ -11,7 +11,8 @@ public class TerrainExperimentRunner : MonoBehaviour
     private enum HeightmapAlgorithm
     {
         Perlin,
-        Fbm
+        Fbm,
+        DiamondSquare
     }
 
     [SerializeField] private Terrain targetTerrain;
@@ -26,6 +27,7 @@ public class TerrainExperimentRunner : MonoBehaviour
     [SerializeField] private int fbmOctaves = 5;
     [SerializeField] private float fbmPersistence = 0.5f;
     [SerializeField] private float fbmLacunarity = 2.0f;
+    [SerializeField] private float diamondSquareRoughness = 0.5f;
     [SerializeField] private int warmupCount = 1;
     [SerializeField] private int measurementCount = 10;
 
@@ -46,6 +48,14 @@ public class TerrainExperimentRunner : MonoBehaviour
         terrainData.heightmapResolution = heightmapResolution;
         terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
         IHeightmapGenerator heightmapGenerator = CreateHeightmapGenerator();
+
+        if (selectedAlgorithm == HeightmapAlgorithm.DiamondSquare && !IsPowerOfTwoPlusOne(heightmapResolution))
+        {
+            UnityEngine.Debug.LogError(
+                $"Diamond-Square requires heightmapResolution to be 2^n + 1. Current value: {heightmapResolution}",
+                this);
+            yield break;
+        }
 
         int totalRunCount = warmupCount + measurementCount;
         int savedMeasurementCount = 0;
@@ -128,12 +138,13 @@ public class TerrainExperimentRunner : MonoBehaviour
 #endif
         Directory.CreateDirectory(resultsDirectory);
 
-        string fileName = $"perlin_terrain_results_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv";
+        string algorithmFileName = GetAlgorithmFileName(heightmapGenerator.AlgorithmName);
+        string fileName = $"{algorithmFileName}_terrain_results_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv";
         string filePath = Path.Combine(resultsDirectory, fileName);
         File.WriteAllText(filePath, csvBuilder.ToString(), Encoding.UTF8);
 
         UnityEngine.Debug.Log(
-            $"Perlin terrain benchmark CSV saved: {filePath}, saved_measurement_rows={savedMeasurementCount}",
+            $"{heightmapGenerator.AlgorithmName} terrain benchmark CSV saved: {filePath}, saved_measurement_rows={savedMeasurementCount}",
             this);
     }
 
@@ -174,10 +185,23 @@ public class TerrainExperimentRunner : MonoBehaviour
     {
         switch (selectedAlgorithm)
         {
+            case HeightmapAlgorithm.DiamondSquare:
+                return new DiamondSquareHeightmapGenerator(diamondSquareRoughness, heightScale);
             case HeightmapAlgorithm.Fbm:
                 return new FbmHeightmapGenerator(frequency, fbmOctaves, fbmPersistence, fbmLacunarity, heightScale);
             default:
                 return new PerlinHeightmapGenerator(frequency, heightScale);
         }
+    }
+
+    private bool IsPowerOfTwoPlusOne(int resolution)
+    {
+        int size = resolution - 1;
+        return resolution > 1 && (size & (size - 1)) == 0;
+    }
+
+    private string GetAlgorithmFileName(string algorithmName)
+    {
+        return algorithmName.Replace("-", "_").Replace(" ", "_").ToLowerInvariant();
     }
 }
