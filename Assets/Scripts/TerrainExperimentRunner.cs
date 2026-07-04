@@ -8,6 +8,12 @@ using Unity.Profiling;
 
 public class TerrainExperimentRunner : MonoBehaviour
 {
+    private enum ExperimentRunMode
+    {
+        SingleAlgorithm,
+        RunAllAlgorithms
+    }
+
     private enum HeightmapAlgorithm
     {
         Perlin,
@@ -16,6 +22,7 @@ public class TerrainExperimentRunner : MonoBehaviour
     }
 
     [SerializeField] private Terrain targetTerrain;
+    [SerializeField] private ExperimentRunMode runMode = ExperimentRunMode.SingleAlgorithm;
     [SerializeField] private HeightmapAlgorithm selectedAlgorithm = HeightmapAlgorithm.Perlin;
     [SerializeField] private int heightmapResolution = 513;
     [SerializeField] private float terrainWidth = 500f;
@@ -39,23 +46,67 @@ public class TerrainExperimentRunner : MonoBehaviour
             return;
         }
 
-        StartCoroutine(GenerateTerrainWithProfiling());
+        StartCoroutine(RunExperiment());
     }
 
-    private IEnumerator GenerateTerrainWithProfiling()
+    private IEnumerator RunExperiment()
     {
         TerrainData terrainData = targetTerrain.terrainData;
         terrainData.heightmapResolution = heightmapResolution;
         terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
-        IHeightmapGenerator heightmapGenerator = CreateHeightmapGenerator();
 
-        if (selectedAlgorithm == HeightmapAlgorithm.DiamondSquare && !IsPowerOfTwoPlusOne(heightmapResolution))
+        if (runMode == ExperimentRunMode.RunAllAlgorithms)
+        {
+            HeightmapAlgorithm[] algorithms =
+            {
+                HeightmapAlgorithm.Perlin,
+                HeightmapAlgorithm.Fbm,
+                HeightmapAlgorithm.DiamondSquare
+            };
+
+            foreach (HeightmapAlgorithm algorithm in algorithms)
+            {
+                yield return RunAlgorithmExperiment(terrainData, algorithm);
+
+                if (experimentFailed)
+                {
+                    yield break;
+                }
+
+                yield return null;
+            }
+        }
+        else
+        {
+            yield return RunAlgorithmExperiment(terrainData, selectedAlgorithm);
+
+            if (experimentFailed)
+            {
+                yield break;
+            }
+        }
+
+        UnityEngine.Debug.Log("Terrain experiment complete.", this);
+    }
+
+    private bool experimentFailed;
+
+    private IEnumerator RunAlgorithmExperiment(TerrainData terrainData, HeightmapAlgorithm algorithm)
+    {
+        experimentFailed = false;
+        IHeightmapGenerator heightmapGenerator = CreateHeightmapGenerator(algorithm);
+
+        if (algorithm == HeightmapAlgorithm.DiamondSquare && !IsPowerOfTwoPlusOne(heightmapResolution))
         {
             UnityEngine.Debug.LogError(
-                $"Diamond-Square requires heightmapResolution to be 2^n + 1. Current value: {heightmapResolution}",
+                $"Diamond-Square experiment failed. heightmapResolution must be 2^n + 1. Current value: {heightmapResolution}",
                 this);
+            experimentFailed = true;
             yield break;
         }
+
+        ResetTerrainHeights(terrainData);
+        UnityEngine.Debug.Log($"{heightmapGenerator.AlgorithmName} terrain benchmark started.", this);
 
         int totalRunCount = warmupCount + measurementCount;
         int savedMeasurementCount = 0;
@@ -69,64 +120,89 @@ public class TerrainExperimentRunner : MonoBehaviour
             yield return null;
 
             ProfilerRecorder totalUsedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Total Used Memory", 1);
+            bool runFailed = false;
+            int generationFrameCount = 0;
+            double algorithmMs = 0.0;
+            double setHeightsMs = 0.0;
+            double totalMs = 0.0;
 
             try
             {
-                int generationFrameCount = Time.frameCount;
+                generationFrameCount = Time.frameCount;
                 Stopwatch totalStopwatch = Stopwatch.StartNew();
 
-                terrainData.heightmapResolution = heightmapResolution;
-                terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
-
-                Stopwatch algorithmStopwatch = Stopwatch.StartNew();
-                float[,] heights = heightmapGenerator.Generate(heightmapResolution, seed);
-                algorithmStopwatch.Stop();
-
-                Stopwatch setHeightsStopwatch = Stopwatch.StartNew();
-                terrainData.SetHeights(0, 0, heights);
-                setHeightsStopwatch.Stop();
-
-                totalStopwatch.Stop();
-
-                double algorithmMs = algorithmStopwatch.Elapsed.TotalMilliseconds;
-                double setHeightsMs = setHeightsStopwatch.Elapsed.TotalMilliseconds;
-                double totalMs = totalStopwatch.Elapsed.TotalMilliseconds;
-
-                yield return null;
-
-                int measurementFrameCount = Time.frameCount;
-                double generationFrameMs = Time.unscaledDeltaTime * 1000.0;
-                bool hasTotalUsedMemorySample = totalUsedMemoryRecorder.Valid && totalUsedMemoryRecorder.Count > 0;
-
-                if (!hasTotalUsedMemorySample)
+                try
                 {
-                    UnityEngine.Debug.LogWarning(
-                        $"ProfilerRecorder sample missing. generation_frame_count={generationFrameCount}, " +
-                        $"total_used_memory_valid={totalUsedMemoryRecorder.Valid}, " +
-                        $"total_used_memory_count={totalUsedMemoryRecorder.Count}",
+                    terrainData.heightmapResolution = heightmapResolution;
+                    terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
+
+                    Stopwatch algorithmStopwatch = Stopwatch.StartNew();
+                    float[,] heights = heightmapGenerator.Generate(heightmapResolution, seed);
+                    algorithmStopwatch.Stop();
+
+                    Stopwatch setHeightsStopwatch = Stopwatch.StartNew();
+                    terrainData.SetHeights(0, 0, heights);
+                    setHeightsStopwatch.Stop();
+
+                    totalStopwatch.Stop();
+
+                    algorithmMs = algorithmStopwatch.Elapsed.TotalMilliseconds;
+                    setHeightsMs = setHeightsStopwatch.Elapsed.TotalMilliseconds;
+                    totalMs = totalStopwatch.Elapsed.TotalMilliseconds;
+                }
+                catch (System.Exception exception)
+                {
+                    totalStopwatch.Stop();
+                    UnityEngine.Debug.LogError(
+                        $"{heightmapGenerator.AlgorithmName} experiment failed: {exception.Message}",
                         this);
+                    experimentFailed = true;
+                    runFailed = true;
                 }
 
-                double totalUsedMemoryMb = hasTotalUsedMemorySample
-                    ? totalUsedMemoryRecorder.LastValue / (1024.0 * 1024.0)
-                    : double.NaN;
-
-                UnityEngine.Debug.Log(
-                    $"algorithm_ms={algorithmMs:F3}, set_heights_ms={setHeightsMs:F3}, total_ms={totalMs:F3}, " +
-                    $"generation_frame_ms={generationFrameMs:F3}, total_used_memory_mb={totalUsedMemoryMb:F3}, " +
-                    $"generation_frame_count={generationFrameCount}, measurement_frame_count={measurementFrameCount}",
-                    this);
-
-                if (runIndex >= warmupCount)
+                if (!runFailed)
                 {
-                    int measurementRun = runIndex - warmupCount + 1;
-                    AppendCsvRow(csvBuilder, measurementRun, heightmapGenerator.AlgorithmName, algorithmMs, setHeightsMs, totalMs, generationFrameMs, totalUsedMemoryMb);
-                    savedMeasurementCount++;
+                    yield return null;
+
+                    int measurementFrameCount = Time.frameCount;
+                    double generationFrameMs = Time.unscaledDeltaTime * 1000.0;
+                    bool hasTotalUsedMemorySample = totalUsedMemoryRecorder.Valid && totalUsedMemoryRecorder.Count > 0;
+
+                    if (!hasTotalUsedMemorySample)
+                    {
+                        UnityEngine.Debug.LogWarning(
+                            $"ProfilerRecorder sample missing. generation_frame_count={generationFrameCount}, " +
+                            $"total_used_memory_valid={totalUsedMemoryRecorder.Valid}, " +
+                            $"total_used_memory_count={totalUsedMemoryRecorder.Count}",
+                            this);
+                    }
+
+                    double totalUsedMemoryMb = hasTotalUsedMemorySample
+                        ? totalUsedMemoryRecorder.LastValue / (1024.0 * 1024.0)
+                        : double.NaN;
+
+                    UnityEngine.Debug.Log(
+                        $"algorithm_ms={algorithmMs:F3}, set_heights_ms={setHeightsMs:F3}, total_ms={totalMs:F3}, " +
+                        $"generation_frame_ms={generationFrameMs:F3}, total_used_memory_mb={totalUsedMemoryMb:F3}, " +
+                        $"generation_frame_count={generationFrameCount}, measurement_frame_count={measurementFrameCount}",
+                        this);
+
+                    if (runIndex >= warmupCount)
+                    {
+                        int measurementRun = runIndex - warmupCount + 1;
+                        AppendCsvRow(csvBuilder, measurementRun, heightmapGenerator.AlgorithmName, algorithmMs, setHeightsMs, totalMs, generationFrameMs, totalUsedMemoryMb);
+                        savedMeasurementCount++;
+                    }
                 }
             }
             finally
             {
                 totalUsedMemoryRecorder.Dispose();
+            }
+
+            if (runFailed)
+            {
+                yield break;
             }
         }
 
@@ -146,6 +222,8 @@ public class TerrainExperimentRunner : MonoBehaviour
         UnityEngine.Debug.Log(
             $"{heightmapGenerator.AlgorithmName} terrain benchmark CSV saved: {filePath}, saved_measurement_rows={savedMeasurementCount}",
             this);
+
+        UnityEngine.Debug.Log($"{heightmapGenerator.AlgorithmName} terrain benchmark completed.", this);
     }
 
     private void ResetTerrainHeights(TerrainData terrainData)
@@ -181,9 +259,9 @@ public class TerrainExperimentRunner : MonoBehaviour
         csvBuilder.AppendLine();
     }
 
-    private IHeightmapGenerator CreateHeightmapGenerator()
+    private IHeightmapGenerator CreateHeightmapGenerator(HeightmapAlgorithm algorithm)
     {
-        switch (selectedAlgorithm)
+        switch (algorithm)
         {
             case HeightmapAlgorithm.DiamondSquare:
                 return new DiamondSquareHeightmapGenerator(diamondSquareRoughness, heightScale);
