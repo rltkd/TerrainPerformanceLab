@@ -8,7 +8,14 @@ using Unity.Profiling;
 
 public class TerrainExperimentRunner : MonoBehaviour
 {
+    private enum HeightmapAlgorithm
+    {
+        Perlin,
+        Fbm
+    }
+
     [SerializeField] private Terrain targetTerrain;
+    [SerializeField] private HeightmapAlgorithm selectedAlgorithm = HeightmapAlgorithm.Perlin;
     [SerializeField] private int heightmapResolution = 513;
     [SerializeField] private float terrainWidth = 500f;
     [SerializeField] private float terrainLength = 500f;
@@ -16,6 +23,9 @@ public class TerrainExperimentRunner : MonoBehaviour
     [SerializeField] private int seed = 12345;
     [SerializeField] private float frequency = 6f;
     [SerializeField] private float heightScale = 1f;
+    [SerializeField] private int fbmOctaves = 5;
+    [SerializeField] private float fbmPersistence = 0.5f;
+    [SerializeField] private float fbmLacunarity = 2.0f;
     [SerializeField] private int warmupCount = 1;
     [SerializeField] private int measurementCount = 10;
 
@@ -35,7 +45,7 @@ public class TerrainExperimentRunner : MonoBehaviour
         TerrainData terrainData = targetTerrain.terrainData;
         terrainData.heightmapResolution = heightmapResolution;
         terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
-        IHeightmapGenerator heightmapGenerator = new PerlinHeightmapGenerator(frequency, heightScale);
+        IHeightmapGenerator heightmapGenerator = CreateHeightmapGenerator();
 
         int totalRunCount = warmupCount + measurementCount;
         int savedMeasurementCount = 0;
@@ -160,4 +170,14 @@ public class TerrainExperimentRunner : MonoBehaviour
         csvBuilder.AppendLine();
     }
 
+    private IHeightmapGenerator CreateHeightmapGenerator()
+    {
+        switch (selectedAlgorithm)
+        {
+            case HeightmapAlgorithm.Fbm:
+                return new FbmHeightmapGenerator(frequency, fbmOctaves, fbmPersistence, fbmLacunarity, heightScale);
+            default:
+                return new PerlinHeightmapGenerator(frequency, heightScale);
+        }
+    }
 }
