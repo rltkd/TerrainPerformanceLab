@@ -6,7 +6,7 @@ using System.Text;
 using UnityEngine;
 using Unity.Profiling;
 
-public class PerlinTerrainGenerator : MonoBehaviour
+public class TerrainExperimentRunner : MonoBehaviour
 {
     [SerializeField] private Terrain targetTerrain;
     [SerializeField] private int heightmapResolution = 513;
@@ -23,7 +23,7 @@ public class PerlinTerrainGenerator : MonoBehaviour
     {
         if (targetTerrain == null)
         {
-            UnityEngine.Debug.LogWarning("PerlinTerrainGenerator requires a Terrain reference.", this);
+            UnityEngine.Debug.LogWarning("TerrainExperimentRunner requires a Terrain reference.", this);
             return;
         }
 
@@ -35,6 +35,7 @@ public class PerlinTerrainGenerator : MonoBehaviour
         TerrainData terrainData = targetTerrain.terrainData;
         terrainData.heightmapResolution = heightmapResolution;
         terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
+        IHeightmapGenerator heightmapGenerator = new PerlinHeightmapGenerator(frequency, heightScale);
 
         int totalRunCount = warmupCount + measurementCount;
         int savedMeasurementCount = 0;
@@ -58,7 +59,7 @@ public class PerlinTerrainGenerator : MonoBehaviour
                 terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
 
                 Stopwatch algorithmStopwatch = Stopwatch.StartNew();
-                float[,] heights = GenerateHeights(heightmapResolution);
+                float[,] heights = heightmapGenerator.Generate(heightmapResolution, seed);
                 algorithmStopwatch.Stop();
 
                 Stopwatch setHeightsStopwatch = Stopwatch.StartNew();
@@ -99,7 +100,7 @@ public class PerlinTerrainGenerator : MonoBehaviour
                 if (runIndex >= warmupCount)
                 {
                     int measurementRun = runIndex - warmupCount + 1;
-                    AppendCsvRow(csvBuilder, measurementRun, algorithmMs, setHeightsMs, totalMs, generationFrameMs, totalUsedMemoryMb);
+                    AppendCsvRow(csvBuilder, measurementRun, heightmapGenerator.AlgorithmName, algorithmMs, setHeightsMs, totalMs, generationFrameMs, totalUsedMemoryMb);
                     savedMeasurementCount++;
                 }
             }
@@ -134,6 +135,7 @@ public class PerlinTerrainGenerator : MonoBehaviour
     private void AppendCsvRow(
         StringBuilder csvBuilder,
         int run,
+        string algorithmName,
         double algorithmMs,
         double setHeightsMs,
         double totalMs,
@@ -141,7 +143,9 @@ public class PerlinTerrainGenerator : MonoBehaviour
         double totalUsedMemoryMb)
     {
         csvBuilder.Append(run);
-        csvBuilder.Append(",Perlin,");
+        csvBuilder.Append(',');
+        csvBuilder.Append(algorithmName);
+        csvBuilder.Append(',');
         csvBuilder.Append(heightmapResolution);
         csvBuilder.Append(',');
         csvBuilder.Append(algorithmMs.ToString("F3", CultureInfo.InvariantCulture));
@@ -156,26 +160,4 @@ public class PerlinTerrainGenerator : MonoBehaviour
         csvBuilder.AppendLine();
     }
 
-    private float[,] GenerateHeights(int resolution)
-    {
-        float[,] heights = new float[resolution, resolution];
-        float seedOffsetX = seed * 0.001f;
-        float seedOffsetY = seed * 0.002f;
-
-        for (int y = 0; y < resolution; y++)
-        {
-            for (int x = 0; x < resolution; x++)
-            {
-                float normalizedX = x / (float)(resolution - 1);
-                float normalizedY = y / (float)(resolution - 1);
-                float sampleX = normalizedX * frequency + seedOffsetX;
-                float sampleY = normalizedY * frequency + seedOffsetY;
-                float noise = Mathf.PerlinNoise(sampleX, sampleY);
-
-                heights[y, x] = Mathf.Clamp01(noise * heightScale);
-            }
-        }
-
-        return heights;
-    }
 }
