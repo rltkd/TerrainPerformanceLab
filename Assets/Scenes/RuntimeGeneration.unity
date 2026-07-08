@@ -435,6 +435,7 @@ MonoBehaviour:
   runMode: 1
   selectedAlgorithm: 2
   heightmapResolution: 513
+  measurementResolutions: 010200000104000001080000
   terrainWidth: 500
   terrainLength: 500
   terrainHeight: 300

@@ -22,10 +22,23 @@ public class TerrainExperimentRunner : MonoBehaviour
         DiamondSquare
     }
 
+    private struct MeasurementResult
+    {
+        public int Run;
+        public HeightmapAlgorithm Algorithm;
+        public int Resolution;
+        public double AlgorithmMs;
+        public double SetHeightsMs;
+        public double TotalMs;
+        public double GenerationFrameMs;
+        public double TotalUsedMemoryMb;
+    }
+
     [SerializeField] private Terrain targetTerrain;
     [SerializeField] private ExperimentRunMode runMode = ExperimentRunMode.SingleAlgorithm;
     [SerializeField] private HeightmapAlgorithm selectedAlgorithm = HeightmapAlgorithm.Perlin;
     [SerializeField] private int heightmapResolution = 513;
+    [SerializeField] private int[] measurementResolutions = { 513, 1025, 2049 };
     [SerializeField] private float terrainWidth = 500f;
     [SerializeField] private float terrainLength = 500f;
     [SerializeField] private float terrainHeight = 300f;
@@ -39,6 +52,8 @@ public class TerrainExperimentRunner : MonoBehaviour
     [SerializeField] private int warmupCount = 1;
     [SerializeField] private int measurementCount = 10;
     [SerializeField] private bool quitAfterCompletion = false;
+
+    private bool experimentFailed;
 
     private void Start()
     {
@@ -62,23 +77,28 @@ public class TerrainExperimentRunner : MonoBehaviour
 
     private IEnumerator RunExperiment()
     {
+        if (!ValidateMeasurementResolutions())
+        {
+            yield break;
+        }
+
         TerrainData terrainData = targetTerrain.terrainData;
         terrainData.heightmapResolution = heightmapResolution;
         terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
-        List<string> csvFilePaths = new List<string>();
+        List<MeasurementResult> results = new List<MeasurementResult>();
+        HeightmapAlgorithm[] algorithms = GetAlgorithmsToRun();
 
-        if (runMode == ExperimentRunMode.RunAllAlgorithms)
+        foreach (HeightmapAlgorithm algorithm in algorithms)
         {
-            HeightmapAlgorithm[] algorithms =
+            foreach (int resolution in measurementResolutions)
             {
-                HeightmapAlgorithm.Perlin,
-                HeightmapAlgorithm.Fbm,
-                HeightmapAlgorithm.DiamondSquare
-            };
+                terrainData.heightmapResolution = resolution;
+                terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
+                ResetTerrainHeights(terrainData, resolution);
 
-            foreach (HeightmapAlgorithm algorithm in algorithms)
-            {
-                yield return RunAlgorithmExperiment(terrainData, algorithm, csvFilePaths);
+                yield return null;
+
+                yield return RunAlgorithmExperiment(terrainData, algorithm, resolution, results);
 
                 if (experimentFailed)
                 {
@@ -88,55 +108,36 @@ public class TerrainExperimentRunner : MonoBehaviour
                 yield return null;
             }
         }
-        else
-        {
-            yield return RunAlgorithmExperiment(terrainData, selectedAlgorithm, csvFilePaths);
 
-            if (experimentFailed)
-            {
-                yield break;
-            }
-        }
-
-        UnityEngine.Debug.Log($"Terrain experiment complete. CSV files: {string.Join(", ", csvFilePaths)}", this);
+        string csvFilePath = WriteResultsCsv(results, algorithms.Length, measurementResolutions.Length);
+        UnityEngine.Debug.Log($"Terrain experiment complete. CSV file: {csvFilePath}", this);
 
         if (quitAfterCompletion)
         {
 #if UNITY_EDITOR
-            UnityEngine.Debug.Log("Quit After Completion이 활성화되어 있지만 Editor에서는 종료하지 않습니다.", this);
+            UnityEngine.Debug.Log("Quit After Completion is enabled, but the Editor will not quit.", this);
 #else
             Application.Quit();
 #endif
         }
     }
 
-    private bool experimentFailed;
-
-    private IEnumerator RunAlgorithmExperiment(TerrainData terrainData, HeightmapAlgorithm algorithm, List<string> csvFilePaths)
+    private IEnumerator RunAlgorithmExperiment(
+        TerrainData terrainData,
+        HeightmapAlgorithm algorithm,
+        int resolution,
+        List<MeasurementResult> results)
     {
         experimentFailed = false;
         IHeightmapGenerator heightmapGenerator = CreateHeightmapGenerator(algorithm);
-
-        if (algorithm == HeightmapAlgorithm.DiamondSquare && !IsPowerOfTwoPlusOne(heightmapResolution))
-        {
-            UnityEngine.Debug.LogError(
-                $"Diamond-Square experiment failed. heightmapResolution must be 2^n + 1. Current value: {heightmapResolution}",
-                this);
-            experimentFailed = true;
-            yield break;
-        }
-
-        ResetTerrainHeights(terrainData);
-        UnityEngine.Debug.Log($"{heightmapGenerator.AlgorithmName} terrain benchmark started.", this);
+        UnityEngine.Debug.Log($"[START] algorithm={heightmapGenerator.AlgorithmName}, resolution={resolution}", this);
 
         int totalRunCount = warmupCount + measurementCount;
         int savedMeasurementCount = 0;
-        StringBuilder csvBuilder = new StringBuilder();
-        csvBuilder.AppendLine("run,algorithm,resolution,algorithm_ms,set_heights_ms,total_ms,generation_frame_ms,total_used_memory_mb");
 
         for (int runIndex = 0; runIndex < totalRunCount; runIndex++)
         {
-            ResetTerrainHeights(terrainData);
+            ResetTerrainHeights(terrainData, resolution);
 
             yield return null;
 
@@ -154,11 +155,8 @@ public class TerrainExperimentRunner : MonoBehaviour
 
                 try
                 {
-                    terrainData.heightmapResolution = heightmapResolution;
-                    terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
-
                     Stopwatch algorithmStopwatch = Stopwatch.StartNew();
-                    float[,] heights = heightmapGenerator.Generate(heightmapResolution, seed);
+                    float[,] heights = heightmapGenerator.Generate(resolution, seed);
                     algorithmStopwatch.Stop();
 
                     Stopwatch setHeightsStopwatch = Stopwatch.StartNew();
@@ -211,7 +209,17 @@ public class TerrainExperimentRunner : MonoBehaviour
                     if (runIndex >= warmupCount)
                     {
                         int measurementRun = runIndex - warmupCount + 1;
-                        AppendCsvRow(csvBuilder, measurementRun, heightmapGenerator.AlgorithmName, algorithmMs, setHeightsMs, totalMs, generationFrameMs, totalUsedMemoryMb);
+                        results.Add(new MeasurementResult
+                        {
+                            Run = measurementRun,
+                            Algorithm = algorithm,
+                            Resolution = resolution,
+                            AlgorithmMs = algorithmMs,
+                            SetHeightsMs = setHeightsMs,
+                            TotalMs = totalMs,
+                            GenerationFrameMs = generationFrameMs,
+                            TotalUsedMemoryMb = totalUsedMemoryMb
+                        });
                         savedMeasurementCount++;
                     }
                 }
@@ -227,6 +235,18 @@ public class TerrainExperimentRunner : MonoBehaviour
             }
         }
 
+        UnityEngine.Debug.Log(
+            $"[COMPLETE] algorithm={heightmapGenerator.AlgorithmName}, resolution={resolution}, measurements={savedMeasurementCount}",
+            this);
+    }
+
+    private void ResetTerrainHeights(TerrainData terrainData, int resolution)
+    {
+        terrainData.SetHeights(0, 0, new float[resolution, resolution]);
+    }
+
+    private string WriteResultsCsv(List<MeasurementResult> results, int algorithmCount, int resolutionCount)
+    {
 #if UNITY_EDITOR
         string projectRoot = Directory.GetParent(Application.dataPath).FullName;
         string resultsDirectory = Path.Combine(projectRoot, "Results");
@@ -235,50 +255,58 @@ public class TerrainExperimentRunner : MonoBehaviour
 #endif
         Directory.CreateDirectory(resultsDirectory);
 
-        string algorithmFileName = GetAlgorithmFileName(heightmapGenerator.AlgorithmName);
-        string fileName = $"{algorithmFileName}_terrain_results_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv";
+        StringBuilder csvBuilder = new StringBuilder();
+        csvBuilder.AppendLine("run,algorithm,resolution,algorithm_ms,set_heights_ms,total_ms,generation_frame_ms,total_used_memory_mb");
+
+        for (int i = 0; i < results.Count; i++)
+        {
+            AppendCsvRow(csvBuilder, results[i]);
+        }
+
+        string fileName = $"runtime_terrain_results_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv";
         string filePath = Path.Combine(resultsDirectory, fileName);
         File.WriteAllText(filePath, csvBuilder.ToString(), Encoding.UTF8);
-        csvFilePaths.Add(filePath);
 
         UnityEngine.Debug.Log(
-            $"{heightmapGenerator.AlgorithmName} terrain benchmark CSV saved: {filePath}, saved_measurement_rows={savedMeasurementCount}",
+            $"Runtime terrain results CSV saved: {filePath}, total_rows={results.Count}, algorithm_count={algorithmCount}, resolution_count={resolutionCount}",
             this);
 
-        UnityEngine.Debug.Log($"{heightmapGenerator.AlgorithmName} terrain benchmark completed.", this);
+        return filePath;
     }
 
-    private void ResetTerrainHeights(TerrainData terrainData)
+    private void AppendCsvRow(StringBuilder csvBuilder, MeasurementResult result)
     {
-        terrainData.SetHeights(0, 0, new float[heightmapResolution, heightmapResolution]);
-    }
-
-    private void AppendCsvRow(
-        StringBuilder csvBuilder,
-        int run,
-        string algorithmName,
-        double algorithmMs,
-        double setHeightsMs,
-        double totalMs,
-        double generationFrameMs,
-        double totalUsedMemoryMb)
-    {
-        csvBuilder.Append(run);
+        csvBuilder.Append(result.Run);
         csvBuilder.Append(',');
-        csvBuilder.Append(algorithmName);
+        csvBuilder.Append(GetAlgorithmName(result.Algorithm));
         csvBuilder.Append(',');
-        csvBuilder.Append(heightmapResolution);
+        csvBuilder.Append(result.Resolution);
         csvBuilder.Append(',');
-        csvBuilder.Append(algorithmMs.ToString("F3", CultureInfo.InvariantCulture));
+        csvBuilder.Append(result.AlgorithmMs.ToString("F3", CultureInfo.InvariantCulture));
         csvBuilder.Append(',');
-        csvBuilder.Append(setHeightsMs.ToString("F3", CultureInfo.InvariantCulture));
+        csvBuilder.Append(result.SetHeightsMs.ToString("F3", CultureInfo.InvariantCulture));
         csvBuilder.Append(',');
-        csvBuilder.Append(totalMs.ToString("F3", CultureInfo.InvariantCulture));
+        csvBuilder.Append(result.TotalMs.ToString("F3", CultureInfo.InvariantCulture));
         csvBuilder.Append(',');
-        csvBuilder.Append(generationFrameMs.ToString("F3", CultureInfo.InvariantCulture));
+        csvBuilder.Append(result.GenerationFrameMs.ToString("F3", CultureInfo.InvariantCulture));
         csvBuilder.Append(',');
-        csvBuilder.Append(totalUsedMemoryMb.ToString("F3", CultureInfo.InvariantCulture));
+        csvBuilder.Append(result.TotalUsedMemoryMb.ToString("F3", CultureInfo.InvariantCulture));
         csvBuilder.AppendLine();
+    }
+
+    private HeightmapAlgorithm[] GetAlgorithmsToRun()
+    {
+        if (runMode == ExperimentRunMode.RunAllAlgorithms)
+        {
+            return new[]
+            {
+                HeightmapAlgorithm.Perlin,
+                HeightmapAlgorithm.Fbm,
+                HeightmapAlgorithm.DiamondSquare
+            };
+        }
+
+        return new[] { selectedAlgorithm };
     }
 
     private IHeightmapGenerator CreateHeightmapGenerator(HeightmapAlgorithm algorithm)
@@ -294,14 +322,45 @@ public class TerrainExperimentRunner : MonoBehaviour
         }
     }
 
+    private string GetAlgorithmName(HeightmapAlgorithm algorithm)
+    {
+        switch (algorithm)
+        {
+            case HeightmapAlgorithm.DiamondSquare:
+                return "Diamond-Square";
+            case HeightmapAlgorithm.Fbm:
+                return "fBm";
+            default:
+                return "Perlin";
+        }
+    }
+
+    private bool ValidateMeasurementResolutions()
+    {
+        if (measurementResolutions == null || measurementResolutions.Length == 0)
+        {
+            UnityEngine.Debug.LogError("Measurement resolutions list is empty.", this);
+            return false;
+        }
+
+        for (int i = 0; i < measurementResolutions.Length; i++)
+        {
+            int resolution = measurementResolutions[i];
+            if (!IsPowerOfTwoPlusOne(resolution))
+            {
+                UnityEngine.Debug.LogError(
+                    $"Invalid measurement resolution: {resolution}. All resolutions must be 2^n + 1.",
+                    this);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private bool IsPowerOfTwoPlusOne(int resolution)
     {
         int size = resolution - 1;
         return resolution > 1 && (size & (size - 1)) == 0;
-    }
-
-    private string GetAlgorithmFileName(string algorithmName)
-    {
-        return algorithmName.Replace("-", "_").Replace(" ", "_").ToLowerInvariant();
     }
 }
