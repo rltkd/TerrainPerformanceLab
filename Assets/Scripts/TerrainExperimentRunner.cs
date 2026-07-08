@@ -48,6 +48,15 @@ public class TerrainExperimentRunner : MonoBehaviour
             return;
         }
 
+        QualitySettings.vSyncCount = 0;
+        Application.targetFrameRate = -1;
+
+        UnityEngine.Debug.Log(
+            $"Runtime frame settings applied. QualitySettings.vSyncCount={QualitySettings.vSyncCount}, " +
+            $"Application.targetFrameRate={Application.targetFrameRate}, " +
+            $"Screen.currentResolution.refreshRateRatio={Screen.currentResolution.refreshRateRatio}",
+            this);
+
         StartCoroutine(RunExperiment());
     }
 
