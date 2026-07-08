@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -37,6 +38,7 @@ public class TerrainExperimentRunner : MonoBehaviour
     [SerializeField] private float diamondSquareRoughness = 0.5f;
     [SerializeField] private int warmupCount = 1;
     [SerializeField] private int measurementCount = 10;
+    [SerializeField] private bool quitAfterCompletion = false;
 
     private void Start()
     {
@@ -54,6 +56,7 @@ public class TerrainExperimentRunner : MonoBehaviour
         TerrainData terrainData = targetTerrain.terrainData;
         terrainData.heightmapResolution = heightmapResolution;
         terrainData.size = new Vector3(terrainWidth, terrainHeight, terrainLength);
+        List<string> csvFilePaths = new List<string>();
 
         if (runMode == ExperimentRunMode.RunAllAlgorithms)
         {
@@ -66,7 +69,7 @@ public class TerrainExperimentRunner : MonoBehaviour
 
             foreach (HeightmapAlgorithm algorithm in algorithms)
             {
-                yield return RunAlgorithmExperiment(terrainData, algorithm);
+                yield return RunAlgorithmExperiment(terrainData, algorithm, csvFilePaths);
 
                 if (experimentFailed)
                 {
@@ -78,7 +81,7 @@ public class TerrainExperimentRunner : MonoBehaviour
         }
         else
         {
-            yield return RunAlgorithmExperiment(terrainData, selectedAlgorithm);
+            yield return RunAlgorithmExperiment(terrainData, selectedAlgorithm, csvFilePaths);
 
             if (experimentFailed)
             {
@@ -86,12 +89,21 @@ public class TerrainExperimentRunner : MonoBehaviour
             }
         }
 
-        UnityEngine.Debug.Log("Terrain experiment complete.", this);
+        UnityEngine.Debug.Log($"Terrain experiment complete. CSV files: {string.Join(", ", csvFilePaths)}", this);
+
+        if (quitAfterCompletion)
+        {
+#if UNITY_EDITOR
+            UnityEngine.Debug.Log("Quit After Completion이 활성화되어 있지만 Editor에서는 종료하지 않습니다.", this);
+#else
+            Application.Quit();
+#endif
+        }
     }
 
     private bool experimentFailed;
 
-    private IEnumerator RunAlgorithmExperiment(TerrainData terrainData, HeightmapAlgorithm algorithm)
+    private IEnumerator RunAlgorithmExperiment(TerrainData terrainData, HeightmapAlgorithm algorithm, List<string> csvFilePaths)
     {
         experimentFailed = false;
         IHeightmapGenerator heightmapGenerator = CreateHeightmapGenerator(algorithm);
@@ -218,6 +230,7 @@ public class TerrainExperimentRunner : MonoBehaviour
         string fileName = $"{algorithmFileName}_terrain_results_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv";
         string filePath = Path.Combine(resultsDirectory, fileName);
         File.WriteAllText(filePath, csvBuilder.ToString(), Encoding.UTF8);
+        csvFilePaths.Add(filePath);
 
         UnityEngine.Debug.Log(
             $"{heightmapGenerator.AlgorithmName} terrain benchmark CSV saved: {filePath}, saved_measurement_rows={savedMeasurementCount}",
