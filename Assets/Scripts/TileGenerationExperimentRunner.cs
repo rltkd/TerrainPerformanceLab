@@ -43,9 +43,14 @@ public class TileGenerationExperimentRunner : MonoBehaviour
     [SerializeField] private int octaves = 5;
     [SerializeField] private float persistence = 0.5f;
     [SerializeField] private float lacunarity = 2.0f;
+    [SerializeField] private Material terrainMaterial;
     [SerializeField] private int warmupCount = 1;
     [SerializeField] private int measurementCount = 10;
     [SerializeField] private bool quitAfterCompletion = true;
+    [SerializeField] private bool autoPositionCamera = true;
+    [SerializeField] private float cameraHeightMultiplier = 0.9f;
+    [SerializeField] private float cameraDistanceMultiplier = 0.9f;
+    [SerializeField] private float cameraFieldOfView = 55f;
     [SerializeField] private TileGenerationMode[] generationModes =
     {
         TileGenerationMode.BatchAll,
@@ -67,7 +72,40 @@ public class TileGenerationExperimentRunner : MonoBehaviour
             $"Screen.currentResolution.refreshRateRatio={Screen.currentResolution.refreshRateRatio}",
             this);
 
+        if (autoPositionCamera)
+        {
+            PositionMainCamera();
+        }
+
         StartCoroutine(RunExperiment());
+    }
+
+    private void PositionMainCamera()
+    {
+        Camera mainCamera = Camera.main;
+        if (mainCamera == null)
+        {
+            UnityEngine.Debug.LogWarning("Auto Position Camera is enabled, but no Main Camera was found.", this);
+            return;
+        }
+
+        float worldWidth = tileCountX * tileSize;
+        float worldLength = tileCountZ * tileSize;
+        float maxWorldSize = Mathf.Max(worldWidth, worldLength);
+        Vector3 center = new Vector3(worldWidth * 0.5f, 0f, worldLength * 0.5f);
+        float cameraHeight = maxWorldSize * cameraHeightMultiplier;
+        float cameraDistance = maxWorldSize * cameraDistanceMultiplier;
+        Vector3 cameraPosition = center + new Vector3(0f, cameraHeight, -cameraDistance);
+
+        mainCamera.transform.position = cameraPosition;
+        mainCamera.transform.LookAt(center + Vector3.up * terrainHeight * 0.25f);
+        mainCamera.fieldOfView = Mathf.Clamp(cameraFieldOfView, 50f, 60f);
+        mainCamera.farClipPlane = maxWorldSize * 4f;
+
+        UnityEngine.Debug.Log(
+            $"Main Camera positioned for tile experiment. position={mainCamera.transform.position}, " +
+            $"fieldOfView={mainCamera.fieldOfView}, farClipPlane={mainCamera.farClipPlane}",
+            this);
     }
 
     private IEnumerator RunExperiment()
@@ -119,7 +157,8 @@ public class TileGenerationExperimentRunner : MonoBehaviour
                 lacunarity,
                 seed,
                 tileCountX,
-                tileCountZ);
+                tileCountZ,
+                terrainMaterial);
 
             List<double> tileTimes = new List<double>(tileCount);
             List<double> frameTimes = new List<double>();

@@ -13,6 +13,7 @@ public class TileTerrainGenerator
     private readonly int seed;
     private readonly int tileCountX;
     private readonly int tileCountZ;
+    private readonly Material terrainMaterial;
 
     public TileTerrainGenerator(
         int resolution,
@@ -24,7 +25,8 @@ public class TileTerrainGenerator
         float lacunarity,
         int seed,
         int tileCountX,
-        int tileCountZ)
+        int tileCountZ,
+        Material terrainMaterial)
     {
         this.resolution = resolution;
         this.tileSize = tileSize;
@@ -36,6 +38,7 @@ public class TileTerrainGenerator
         this.seed = seed;
         this.tileCountX = tileCountX;
         this.tileCountZ = tileCountZ;
+        this.terrainMaterial = terrainMaterial;
     }
 
     public GameObject CreateTileObject(int tileX, int tileZ)
@@ -47,6 +50,10 @@ public class TileTerrainGenerator
         GameObject terrainObject = Terrain.CreateTerrainGameObject(terrainData);
         terrainObject.name = $"Tile_{tileX}_{tileZ}";
         terrainObject.transform.position = new Vector3(tileX * tileSize, 0f, tileZ * tileSize);
+
+        Terrain terrain = terrainObject.GetComponent<Terrain>();
+        terrain.materialTemplate = terrainMaterial;
+
         return terrainObject;
     }
 

@@ -148,9 +148,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f0d86f25d24144308d5e7de9ad95a012, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TileGenerationExperimentRunner
-  tileResolution: 513
-  tileCountX: 2
-  tileCountZ: 2
+  tileResolution: 1025
+  tileCountX: 4
+  tileCountZ: 4
   tileSize: 500
   terrainHeight: 300
   seed: 12345
@@ -158,9 +158,14 @@ MonoBehaviour:
   octaves: 5
   persistence: 0.5
   lacunarity: 2
+  terrainMaterial: {fileID: 2100000, guid: 4fdb16268fd012e40919e8cef7d3d2fa, type: 2}
   warmupCount: 1
-  measurementCount: 1
-  quitAfterCompletion: 0
+  measurementCount: 10
+  quitAfterCompletion: 1
+  autoPositionCamera: 1
+  cameraHeightMultiplier: 0.9
+  cameraDistanceMultiplier: 0.9
+  cameraFieldOfView: 55
   generationModes: 00000000010000000200000003000000
 --- !u!4 &42628256
 Transform:
