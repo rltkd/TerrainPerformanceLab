@@ -160,7 +160,7 @@ MonoBehaviour:
   lacunarity: 2
   terrainMaterial: {fileID: 2100000, guid: 4fdb16268fd012e40919e8cef7d3d2fa, type: 2}
   warmupCount: 1
-  measurementCount: 10
+  measurementCount: 5
   quitAfterCompletion: 1
   autoPositionCamera: 1
   cameraHeightMultiplier: 0.9

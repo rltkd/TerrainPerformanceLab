@@ -60,6 +60,7 @@ public class TileGenerationExperimentRunner : MonoBehaviour
     };
 
     private readonly List<GameObject> generatedTiles = new List<GameObject>();
+    private readonly List<TerrainData> generatedTerrainData = new List<TerrainData>();
 
     private void Start()
     {
@@ -145,7 +146,6 @@ public class TileGenerationExperimentRunner : MonoBehaviour
         for (int runIndex = 0; runIndex < totalRunCount; runIndex++)
         {
             yield return CleanupTiles();
-            yield return null;
 
             TileTerrainGenerator tileGenerator = new TileTerrainGenerator(
                 tileResolution,
@@ -167,7 +167,9 @@ public class TileGenerationExperimentRunner : MonoBehaviour
             {
                 int tileX = tileIndexForSetup % tileCountX;
                 int tileZ = tileIndexForSetup / tileCountX;
-                generatedTiles.Add(tileGenerator.CreateTileObject(tileX, tileZ));
+                GameObject tileObject = tileGenerator.CreateTileObject(tileX, tileZ);
+                generatedTiles.Add(tileObject);
+                TrackTerrainData(tileObject);
             }
 
             yield return null;
@@ -237,6 +239,8 @@ public class TileGenerationExperimentRunner : MonoBehaviour
                 });
                 savedMeasurementCount++;
             }
+
+            yield return CleanupTiles();
         }
 
         UnityEngine.Debug.Log($"[COMPLETE] tile_generation_mode={mode}, measurements={savedMeasurementCount}", this);
@@ -246,14 +250,54 @@ public class TileGenerationExperimentRunner : MonoBehaviour
     {
         for (int i = 0; i < generatedTiles.Count; i++)
         {
-            if (generatedTiles[i] != null)
+            GameObject tile = generatedTiles[i];
+            if (tile != null)
             {
-                Destroy(generatedTiles[i]);
+                Terrain terrain = tile.GetComponent<Terrain>();
+                if (terrain != null)
+                {
+                    TrackTerrainData(tile);
+                    terrain.terrainData = null;
+                }
+
+                TerrainCollider terrainCollider = tile.GetComponent<TerrainCollider>();
+                if (terrainCollider != null)
+                {
+                    terrainCollider.terrainData = null;
+                }
+
+                Destroy(tile);
             }
         }
 
         generatedTiles.Clear();
+
+        for (int i = 0; i < generatedTerrainData.Count; i++)
+        {
+            if (generatedTerrainData[i] != null)
+            {
+                Destroy(generatedTerrainData[i]);
+            }
+        }
+
+        generatedTerrainData.Clear();
         yield return null;
+        yield return null;
+    }
+
+    private void TrackTerrainData(GameObject tileObject)
+    {
+        Terrain terrain = tileObject.GetComponent<Terrain>();
+        if (terrain != null && terrain.terrainData != null && !generatedTerrainData.Contains(terrain.terrainData))
+        {
+            generatedTerrainData.Add(terrain.terrainData);
+        }
+
+        TerrainCollider terrainCollider = tileObject.GetComponent<TerrainCollider>();
+        if (terrainCollider != null && terrainCollider.terrainData != null && !generatedTerrainData.Contains(terrainCollider.terrainData))
+        {
+            generatedTerrainData.Add(terrainCollider.terrainData);
+        }
     }
 
     private string WriteResultsCsv(List<TileMeasurementResult> results)
@@ -375,7 +419,11 @@ public class TileGenerationExperimentRunner : MonoBehaviour
 
         List<double> sortedValues = new List<double>(values);
         sortedValues.Sort();
-        int index = Mathf.Clamp(Mathf.CeilToInt(percentile * sortedValues.Count) - 1, 0, sortedValues.Count - 1);
-        return sortedValues[index];
+        double position = (sortedValues.Count - 1) * percentile;
+        int lowerIndex = Mathf.Clamp((int)System.Math.Floor(position), 0, sortedValues.Count - 1);
+        int upperIndex = Mathf.Clamp((int)System.Math.Ceiling(position), 0, sortedValues.Count - 1);
+        double t = position - lowerIndex;
+
+        return sortedValues[lowerIndex] + (sortedValues[upperIndex] - sortedValues[lowerIndex]) * t;
     }
 }
